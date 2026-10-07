@@ -1,0 +1,3 @@
+#!/bin/sh
+# Keeps the demo off the real clipboard.
+cat > "${TMPDIR:-/tmp}/copy-last-demo-clipboard"

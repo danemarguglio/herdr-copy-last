@@ -9,28 +9,9 @@ Copy an agent's last reply to your clipboard in [herdr](https://herdr.dev), with
 
 You get the exact Markdown the agent wrote: no terminal line wrapping, no `⏺` markers, no tool output, no scrolling back to drag-select. A toast confirms which agent it came from.
 
-```text
- Copy last reply                                                                  4 agents
+![The picker: four agents with their status, and a preview of the selected agent's last reply. Enter copies it.](demo/picker.gif)
 
- ›1 ● idle     api/tests     claude  Fix flaky cache test
-  2 ◐ working  api/auth      codex   Migrate auth to OAuth 2.1
-  3 ▲ blocked  docs/release  pi      Draft release notes
-  4 ● done     docs/perf     claude  Benchmark parser
-───────────────────────────────────────────────────────────────────────────────────────────
- The flaky test was a race: `cache.warm()` returns before the background fill finishes, so
- the first assertion sometimes reads an empty cache.
-
- Fixed by awaiting the fill in `conftest.py` and adding a regression test that runs the
- warm-up 200 times.
-
- - **Changed:** `tests/conftest.py`, `tests/test_cache.py`
- - **Verified:** full suite passes 50 runs in a row (was failing ~1 in 8)
-
- Want me to open a PR?
-
-───────────────────────────────────────────────────────────────────────────────────────────
- ↑↓ jk move · 1-9 jump · enter/y copy · pgup/pgdn scroll · esc close
-```
+<sub>Demo with made-up agents; regenerate with `vhs demo/demo.tape`.</sub>
 
 ## Install
 

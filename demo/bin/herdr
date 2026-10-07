@@ -1,0 +1,16 @@
+#!/bin/sh
+# Stand-in for herdr with four made-up agents, used to record the README images.
+T="$(cd "$(dirname "$0")/../transcripts" && pwd)"
+case "$1 $2" in
+  "agent list") cat <<J
+{"result":{"agents":[
+{"agent":"claude","agent_status":"idle","pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1","focused":true,"terminal_title_stripped":"Fix flaky cache test","agent_session":{"kind":"path","value":"$T/claude-cache.jsonl"}},
+{"agent":"codex","agent_status":"working","pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t2","terminal_title_stripped":"Migrate auth to OAuth 2.1","agent_session":{"kind":"path","value":"$T/codex-auth.jsonl"}},
+{"agent":"pi","agent_status":"blocked","pane_id":"w2:p1","workspace_id":"w2","tab_id":"w2:t1","terminal_title_stripped":"Draft release notes","agent_session":{"kind":"path","value":"$T/pi-release.jsonl"}},
+{"agent":"claude","agent_status":"done","pane_id":"w2:p2","workspace_id":"w2","tab_id":"w2:t2","terminal_title_stripped":"Benchmark parser","agent_session":{"kind":"path","value":"$T/claude-bench.jsonl"}}]}}
+J
+  ;;
+  "workspace list") echo '{"result":{"workspaces":[{"workspace_id":"w1","label":"api"},{"workspace_id":"w2","label":"docs"}]}}' ;;
+  "tab list") echo '{"result":{"tabs":[{"tab_id":"w1:t1","label":"tests"},{"tab_id":"w1:t2","label":"auth"},{"tab_id":"w2:t1","label":"release"},{"tab_id":"w2:t2","label":"perf"}]}}' ;;
+  *) : ;;
+esac

@@ -1,0 +1,3 @@
+#!/bin/sh
+cat "${TMPDIR:-/tmp}/copy-last-demo-clipboard"
+echo

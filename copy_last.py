@@ -318,7 +318,7 @@ class Picker:
             y = row + 2
             self.put(y, 0, " " * (width - 1), base)
             self.put(y, 1, ("›" if selected else " ") + (f"{i + 1}" if i < 9 else " "), base | curses.A_BOLD)
-            self.put(y, 4, symbol, base | self.colors.get(color, 0))
+            self.put(y, 4, symbol, base if selected else self.colors.get(color, 0))
             self.put(y, 6, f"{status:8} {self.location(agent):{place_width}}  {agent.get('agent', ''):7} "
                            f"{agent.get('terminal_title_stripped') or agent['pane_id']}", base)
 

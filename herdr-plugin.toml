@@ -1,0 +1,28 @@
+id = "danemarguglio.copy-last"
+name = "copy-last"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+platforms = ["macos", "linux"]
+description = "Copy an agent's last reply to the clipboard: the focused agent, or any agent from a picker."
+
+# Copies the last reply of the agent in the focused pane.
+[[actions]]
+id = "copy"
+title = "Copy focused agent's last reply"
+contexts = ["pane"]
+command = ["python3", "copy_last.py", "copy"]
+
+# Opens the picker popup below. Actions are what keybindings can target.
+[[actions]]
+id = "pick"
+title = "Pick an agent and copy its last reply"
+contexts = ["global"]
+command = ["python3", "copy_last.py", "open-picker"]
+
+[[panes]]
+id = "picker"
+title = "Copy last reply"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["python3", "copy_last.py", "picker"]

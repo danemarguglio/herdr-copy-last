@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+import textwrap
 
 HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 PLUGIN_ID = os.environ.get("HERDR_PLUGIN_ID") or "danemarguglio.copy-last"
@@ -220,60 +221,160 @@ def copy_agent(agent):
 
 # --- picker ------------------------------------------------------------------
 
+STATUS_STYLE = {
+    # status: (symbol, curses color)
+    "working": ("◐", "yellow"),
+    "blocked": ("▲", "red"),
+    "done": ("●", "blue"),
+    "idle": ("●", "green"),
+}
+
+
+def location_labels():
+    """Map pane ids' workspace and tab ids to their labels, e.g. "wiki/tonie"."""
+    try:
+        workspaces = {w["workspace_id"]: w.get("label") or w["workspace_id"] for w in herdr_json("workspace", "list")["workspaces"]}
+        tabs = {t["tab_id"]: t.get("label") or str(t.get("number", "")) for t in herdr_json("tab", "list")["tabs"]}
+    except (CopyError, OSError, ValueError, KeyError):
+        return lambda agent: agent.get("pane_id", "")
+    return lambda agent: f"{workspaces.get(agent.get('workspace_id'), '?')}/{tabs.get(agent.get('tab_id'), '?')}"
+
+
+def wrap(text, width):
+    lines = []
+    for line in text.expandtabs(4).splitlines() or [""]:
+        indent = line[:len(line) - len(line.lstrip())]
+        lines.extend(textwrap.wrap(line.lstrip(), width, initial_indent=indent, subsequent_indent=indent,
+                                   replace_whitespace=False) or [""])
+    return lines
+
+
+class Picker:
+    HELP = "↑↓ jk move · 1-9 jump · enter/y copy · pgup/pgdn scroll · esc close"
+
+    def __init__(self, screen, agents, location):
+        import curses
+
+        self.curses = curses
+        self.screen = screen
+        self.agents = agents
+        self.location = location
+        self.index = next((i for i, a in enumerate(agents) if a.get("focused")), 0)
+        self.scroll = 0
+        self.previews = {}
+        self.colors = {}
+        curses.curs_set(0)
+        if curses.has_colors():
+            curses.use_default_colors()
+            for n, (name, value) in enumerate(
+                [("yellow", curses.COLOR_YELLOW), ("red", curses.COLOR_RED), ("blue", curses.COLOR_BLUE),
+                 ("green", curses.COLOR_GREEN), ("dim", curses.COLOR_WHITE)], start=1):
+                curses.init_pair(n, value, -1)
+                self.colors[name] = curses.color_pair(n)
+
+    def preview(self, agent):
+        key = agent["pane_id"]
+        if key not in self.previews:
+            try:
+                text, source = last_reply(agent)
+                if not text:
+                    text = "(no reply yet)"
+                elif source == "screen":
+                    text = "(no conversation file — showing recent screen text)\n\n" + text
+            except (CopyError, OSError) as err:
+                text = f"(could not read reply: {err})"
+            self.previews[key] = text
+        return self.previews[key]
+
+    def put(self, y, x, text, attr=0):
+        height, width = self.screen.getmaxyx()
+        if 0 <= y < height and x < width - 1:
+            try:
+                self.screen.addnstr(y, x, text, width - 1 - x, attr)
+            except self.curses.error:
+                pass
+
+    def draw(self):
+        curses = self.curses
+        self.screen.erase()
+        height, width = self.screen.getmaxyx()
+        if height < 8 or width < 30:
+            self.put(0, 0, "Popup too small")
+            self.screen.refresh()
+            return
+        count = f"{len(self.agents)} agent{'s' * (len(self.agents) != 1)}"
+        self.put(0, 1, "Copy last reply", curses.A_BOLD)
+        self.put(0, max(1, width - len(count) - 2), count, self.colors.get("dim", 0))
+
+        list_height = min(len(self.agents), max(3, (height - 5) // 3))
+        top = max(0, min(self.index - list_height + 1, len(self.agents) - list_height))
+        place_width = max(len(self.location(a)) for a in self.agents)
+        for row, agent in enumerate(self.agents[top:top + list_height]):
+            i = top + row
+            selected = i == self.index
+            status = agent.get("agent_status") or "unknown"
+            symbol, color = STATUS_STYLE.get(status, ("○", "dim"))
+            base = curses.A_REVERSE if selected else 0
+            y = row + 2
+            self.put(y, 0, " " * (width - 1), base)
+            self.put(y, 1, ("›" if selected else " ") + (f"{i + 1}" if i < 9 else " "), base | curses.A_BOLD)
+            self.put(y, 4, symbol, base | self.colors.get(color, 0))
+            self.put(y, 6, f"{status:8} {self.location(agent):{place_width}}  {agent.get('agent', ''):7} "
+                           f"{agent.get('terminal_title_stripped') or agent['pane_id']}", base)
+
+        divider = list_height + 2
+        self.put(divider, 0, "─" * (width - 1), self.colors.get("dim", 0))
+        body_top, body_height = divider + 1, height - divider - 3
+        lines = wrap(self.preview(self.agents[self.index]), width - 3)
+        self.scroll = max(0, min(self.scroll, len(lines) - body_height))
+        for row, line in enumerate(lines[self.scroll:self.scroll + body_height]):
+            self.put(body_top + row, 1, line)
+        self.put(height - 2, 0, "─" * (width - 1), self.colors.get("dim", 0))
+        more = f" {self.scroll + 1}-{min(len(lines), self.scroll + body_height)}/{len(lines)} " if len(lines) > body_height else ""
+        self.put(height - 1, 1, self.HELP, self.colors.get("dim", 0))
+        self.put(height - 2, max(1, width - len(more) - 2), more, self.colors.get("dim", 0))
+        self.screen.refresh()
+
+    def move(self, index):
+        self.index = index % len(self.agents)
+        self.scroll = 0
+
+    def run(self):
+        curses = self.curses
+        while True:
+            self.draw()
+            key = self.screen.getch()
+            page = max(1, self.screen.getmaxyx()[0] // 2)
+            if key in (curses.KEY_UP, ord("k")):
+                self.move(self.index - 1)
+            elif key in (curses.KEY_DOWN, ord("j"), 9):
+                self.move(self.index + 1)
+            elif key in (curses.KEY_HOME, ord("g")):
+                self.move(0)
+            elif key in (curses.KEY_END, ord("G")):
+                self.move(len(self.agents) - 1)
+            elif ord("1") <= key <= ord("9") and key - ord("1") < len(self.agents):
+                self.move(key - ord("1"))
+            elif key in (curses.KEY_NPAGE, 4, ord(" ")):  # pgdn, ctrl-d, space
+                self.scroll += page
+            elif key in (curses.KEY_PPAGE, 21):  # pgup, ctrl-u
+                self.scroll = max(0, self.scroll - page)
+            elif key in (curses.KEY_ENTER, 10, 13, ord("y")):
+                return self.agents[self.index]
+            elif key in (27, ord("q"), 3):
+                return None
+
 
 def run_picker():
-    import curses
-
     agents = list_agents()
     if not agents:
         notify("No agents to copy from")
         return
-    previews = {}
-
-    def preview(agent):
-        if agent["pane_id"] not in previews:
-            try:
-                previews[agent["pane_id"]] = last_reply(agent)[0] or "(no reply yet)"
-            except (CopyError, OSError) as err:
-                previews[agent["pane_id"]] = f"(error: {err})"
-        return previews[agent["pane_id"]]
-
-    def draw(screen, index):
-        screen.erase()
-        height, width = screen.getmaxyx()
-        screen.addnstr(0, 0, "Copy last reply   ↑/↓ or j/k move · enter copy · esc close", width - 1, curses.A_BOLD)
-        list_height = min(len(agents), max(3, height // 3))
-        top = max(0, min(index - list_height + 1, len(agents) - list_height))
-        for row, agent in enumerate(agents[top:top + list_height]):
-            i = top + row
-            line = f"{'›' if i == index else ' '} {agent.get('agent_status', '?'):8} {agent_label(agent)}  [{agent['pane_id']}]"
-            screen.addnstr(row + 2, 0, line, width - 1, curses.A_REVERSE if i == index else 0)
-        y = list_height + 3
-        screen.hline(y, 0, curses.ACS_HLINE, width)
-        for line in preview(agents[index]).splitlines():
-            y += 1
-            if y >= height:
-                break
-            screen.addnstr(y, 0, line.expandtabs(4), width - 1)
-        screen.refresh()
-
-    def loop(screen):
-        curses.curs_set(0)
-        index = next((i for i, a in enumerate(agents) if a.get("focused")), 0)
-        while True:
-            draw(screen, index)
-            key = screen.getch()
-            if key in (curses.KEY_UP, ord("k")):
-                index = (index - 1) % len(agents)
-            elif key in (curses.KEY_DOWN, ord("j")):
-                index = (index + 1) % len(agents)
-            elif key in (curses.KEY_ENTER, 10, 13):
-                return agents[index]
-            elif key in (27, ord("q")):
-                return None
-
+    location = location_labels()
     os.environ.setdefault("ESCDELAY", "25")
-    chosen = curses.wrapper(loop)
+    import curses
+
+    chosen = curses.wrapper(lambda screen: Picker(screen, agents, location).run())
     if chosen:
         copy_agent(chosen)
 
